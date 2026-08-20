@@ -1,0 +1,21 @@
+{
+  "name": "pricetag",
+  "version": "1.0.0",
+  "description": "",
+  "main": "src/server.js",
+  "scripts": {
+    "start": "node src/server.js",
+    "warmup": "node src/warmup.js",
+    "generate": "node src/generateMapData.js",
+    "rebuild": "node src/buildData.js",
+    "build:static": "node scripts/build-static.js",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "cors": "^2.8.6",
+    "express": "^5.2.1"
+  }
+}

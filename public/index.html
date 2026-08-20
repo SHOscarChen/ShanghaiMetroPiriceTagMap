@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>上海地铁票价速查</title>
+  <link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+  <div class="header">
+    <h1 id="app-title" title="点击重置">上海地铁票价速查</h1>
+    <div class="controls">
+      <label for="line-select">起始站：</label>
+      <select id="line-select"><option value="">— 选择线路 —</option></select>
+      <select id="station-select" disabled><option value="">— 选择站点 —</option></select>
+      <span id="loading" class="loading" style="display:none">查询中…</span>
+      <div id="scheme-btn" class="scheme-btn-group" style="display:none">
+        <button class="scheme-btn active" data-scheme="current">现行</button>
+        <button class="scheme-btn" data-scheme="scheme1">方案一</button>
+        <button class="scheme-btn" data-scheme="scheme2">方案二</button>
+        <button class="scheme-btn" data-scheme="combo">三合一</button>
+      </div>
+      <button id="btn-save" class="save-btn" disabled>保存价目表</button>
+    </div>
+  </div>
+  <div id="map-wrap">
+    <div class="help-text">双指缩放 · 拖动平移 · 点击圆圈切换起点</div>
+  </div>
+  <div id="status-bar">选择起始站 → 显示到各站票价</div>
+  <div id="tooltip"></div>
+  <script src="/js/app.js"></script>
+</body>
+</html>

@@ -1,0 +1,34 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>站点坐标校准工具</title>
+  <link rel="stylesheet" href="/css/calibrate.css">
+</head>
+<body>
+  <div class="toolbar">
+    <h1>站点坐标校准</h1>
+    <div class="toolbar-controls">
+      <button id="btn-load">加载并解析SVG</button>
+      <button id="btn-save" disabled>导出校准结果</button>
+      <button id="btn-reset" disabled>重置所有修改</button>
+      <span id="status">就绪</span>
+    </div>
+    <div class="toolbar-options">
+      <label><input type="checkbox" id="chk-labels" checked> 显示站名</label>
+      <label><input type="checkbox" id="chk-current" checked> 显示圆点</label>
+      <label>圆点: <input type="range" id="dot-size" min="4" max="24" value="10"></label>
+    </div>
+  </div>
+  <div id="canvas-wrap">
+    <div id="canvas-content"></div>
+    <div class="help-text">滚轮缩放 · 拖拽平移 · 拖拽红色圆点校准</div>
+  </div>
+  <div id="info-panel" class="hidden">
+    <div id="info-content"></div>
+  </div>
+  <div id="tooltip"></div>
+  <script src="/js/calibrate.js"></script>
+</body>
+</html>

@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>三合一导出</title>
+<style>html,body{margin:0;padding:0;background:#fff;}img{display:block;}</style>
+</head>
+<body>
+<script>
+const SVG_W = 2638.57, SVG_H = 3692.52;
+
+async function loadJSON(url) {
+  const r = await fetch(url);
+  return r.json();
+}
+
+async function main() {
+  const params = new URLSearchParams(location.search);
+  const code = params.get('station');
+  const [stations, coords, data] = await Promise.all([
+    loadJSON('/api/stations'),
+    loadJSON('/stations-coords.json'),
+    loadJSON(`/api/prices/${code}`),
+  ]);
+  const byCode = new Map(coords.map((s) => [s.code, s]));
+  const schemePrices = data.schemes || { current: data.prices };
+  const origin = stations.find((s) => s.code === code);
+  const oCoord = byCode.get(code);
+  const originKeys = new Set();
+  if (oCoord) {
+    for (const s of stations) {
+      const c2 = byCode.get(s.code);
+      if (c2 && c2.x === oCoord.x && c2.y === oCoord.y) originKeys.add(s.code);
+    }
+  }
+
+  const scale = 2;
+  const W = Math.round(SVG_W * scale), H = Math.round(SVG_H * scale);
+  const canvas = document.createElement('canvas');
+  canvas.width = W; canvas.height = H;
+  const ctx = canvas.getContext('2d');
+
+  const bg = new Image();
+  await new Promise((resolve, reject) => { bg.onload = resolve; bg.onerror = reject; bg.src = '/images/linesh.svg'; });
+  ctx.fillStyle = '#fff';
+  ctx.fillRect(0, 0, W, H);
+  ctx.drawImage(bg, 0, 0, W, H);
+
+  for (const s of stations) {
+    const coord = byCode.get(s.code);
+    if (!coord) continue;
+    if (s.code === code) {
+      ctx.beginPath();
+      ctx.arc(coord.x * scale, coord.y * scale, 16 * scale, 0, Math.PI * 2);
+      ctx.fillStyle = '#E6002E'; ctx.fill();
+      ctx.lineWidth = 3; ctx.strokeStyle = '#333'; ctx.stroke();
+      ctx.font = `900 ${14 * scale}px Arial, sans-serif`;
+      ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.fillStyle = '#fff'; ctx.fillText('起', coord.x * scale, coord.y * scale);
+      continue;
+    }
+    if (coord.hidden || originKeys.has(s.code)) continue;
+    const segs = ['current', 'scheme1', 'scheme2'].map((k) => {
+      const v = schemePrices[k] ? schemePrices[k][s.code] : null;
+      return v === null || v === undefined ? null : Number(v);
+    });
+    const bw = 20, bh = 15, gap = 1;
+    const colors = ['#fff', '#d6ecff', '#fff3b0'];
+    const topY = coord.y - (segs.length * (bh + gap)) / 2 + bh / 2;
+    for (let i = 0; i < segs.length; i++) {
+      const v = segs[i];
+      const y = topY + i * (bh + gap);
+      ctx.beginPath();
+      ctx.rect((coord.x - bw / 2) * scale, (y - bh / 2) * scale, bw * scale, bh * scale);
+      ctx.fillStyle = colors[i]; ctx.fill();
+      ctx.lineWidth = 1; ctx.strokeStyle = '#333'; ctx.stroke();
+      if (v !== null && v !== undefined) {
+        ctx.font = `700 ${11 * scale}px Arial, sans-serif`;
+        ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+        ctx.fillStyle = '#333';
+        ctx.fillText(v, coord.x * scale, (y + 1) * scale);
+      }
+    }
+  }
+
+  const img = new Image();
+  img.src = canvas.toDataURL('image/png');
+  document.title = `${origin ? origin.name : code}_三合一`;
+  document.body.appendChild(img);
+}
+
+main();
+</script>
+</body>
+</html>
