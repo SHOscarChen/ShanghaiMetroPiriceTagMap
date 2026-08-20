@@ -35,13 +35,13 @@ function setOriginFromCode(code) {
 async function init() {
   let rs;
   try {
-    rs = await fetch('/data/stations.json');
+    rs = await fetch('data/stations.json');
     if (!rs.ok) throw new Error('static missing');
   } catch {
-    rs = await fetch('/api/stations');
+    rs = await fetch('api/stations');
   }
   allStations = await rs.json();
-  const rc = await fetch('/stations-coords.json');
+  const rc = await fetch('stations-coords.json');
   const raw = await rc.json();
   for (const s of raw) stationCoords[s.code] = s;
 
@@ -233,7 +233,7 @@ function createOverlay() {
   content.style.cssText = `transform-origin: 0 0; width:${SVG_W}px; height:${SVG_H}px; position:relative;`;
 
   const img = document.createElement('img');
-  img.src = '/images/linesh.svg';
+  img.src = 'images/linesh.svg';
   img.style.cssText = `width:${SVG_W}px; height:${SVG_H}px; display:block; pointer-events:none;`;
   content.appendChild(img);
 
@@ -281,10 +281,10 @@ async function queryPrices(originCode) {
   try {
     let resp;
     try {
-      resp = await fetch(`/data/prices/${originCode}.json`);
+      resp = await fetch(`data/prices/${originCode}.json`);
       if (!resp.ok) throw new Error('static missing');
     } catch {
-      resp = await fetch(`/api/prices/${originCode}`);
+      resp = await fetch(`api/prices/${originCode}`);
     }
     const data = await resp.json();
     currentPrices = data.prices;
@@ -532,7 +532,7 @@ async function savePriceImage() {
   await new Promise((resolve, reject) => {
     bg.onload = resolve;
     bg.onerror = reject;
-    bg.src = '/images/linesh.svg';
+    bg.src = 'images/linesh.svg';
   });
   ctx.fillStyle = '#fff';
   ctx.fillRect(0, 0, W, H);
