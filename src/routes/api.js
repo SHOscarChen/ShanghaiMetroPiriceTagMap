@@ -4,6 +4,7 @@ const { fetchFare, getAllPrices, SHJIAO_CODES } = require('../services/metroApi'
 const { getStations, getStationName, getMapData } = require('../services/stationData');
 const { getDistances } = require('../services/distances');
 const { priceOf, SCHEME_LABELS } = require('../services/fareCalc');
+const { computeAirportScheme } = require('../services/airportFare');
 
 router.get('/stations', (req, res) => {
   res.json(getStations());
@@ -35,8 +36,8 @@ router.get('/prices/:origin', async (req, res) => {
   result.schemes.current = cur;
 
   // 方案一 / 方案二：基于里程阶梯
-  // 注意：涉及市域机场线(51xx)的站对按官方独立计价（站间费率按段计价），
-  //       不受地铁听证方案一/方案二影响，保持官方现行价即可。
+  // 注意：涉及市域机场线(51xx)的站对，按「地铁段方案阶梯价 + 机场线段官方段价」累加，
+  //       取经中春路/景洪路换乘中较低者（机场线自身费率不随地铁听证方案调整）。
   let distances = null;
   try { distances = getDistances(); } catch { distances = null; }
   for (const scheme of ['scheme1', 'scheme2']) {
@@ -45,8 +46,10 @@ router.get('/prices/:origin', async (req, res) => {
       let price = null;
       const key = [origin, code].sort().join(':');
       if (SHJIAO_CODES.has(origin) || SHJIAO_CODES.has(code)) {
-        // 机场线按段计价：现行=方案一=方案二（官方口径）
-        price = typeof v === 'object' ? Number(v.normal) : Number(v);
+        const officialPrice = typeof v === 'object' ? Number(v.normal) : Number(v);
+        // 地铁段 + 机场线段累加；两端均为机场线站时走官方段价
+        const ap = computeAirportScheme(origin, code, scheme, distances);
+        price = ap != null ? ap : officialPrice;
       } else if (distances && distances[key] != null) {
         price = priceOf(distances[key], scheme);
       } else if (typeof v === 'object') {

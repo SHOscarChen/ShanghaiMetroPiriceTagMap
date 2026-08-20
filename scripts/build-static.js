@@ -13,6 +13,7 @@ const { getStations } = require(path.join(ROOT, 'src/services/stationData'));
 const { getDistances } = require(path.join(ROOT, 'src/services/distances'));
 const { priceOf, SCHEME_LABELS } = require(path.join(ROOT, 'src/services/fareCalc'));
 const { getAllPrices, SHJIAO_CODES } = require(path.join(ROOT, 'src/services/metroApi'));
+const { computeAirportScheme } = require(path.join(ROOT, 'src/services/airportFare'));
 
 const stations = getStations();
 const distances = getDistances();
@@ -25,9 +26,12 @@ function calcSchemes(origin, prices) {
     if (v === null) { s1[code] = null; s2[code] = null; continue; }
     const key = [origin, code].sort().join(':');
     if (SHJIAO_CODES.has(origin) || SHJIAO_CODES.has(code)) {
-      // 机场线按段计价：现行=方案一=方案二（官方口径）
-      const p = typeof v === 'object' ? Number(v.normal) : Number(v);
-      s1[code] = p; s2[code] = p;
+      // 地铁段(方案阶梯) + 机场线段(官方段价) 累加；两端均为机场线站时走官方段价
+      const officialPrice = typeof v === 'object' ? Number(v.normal) : Number(v);
+      const a1 = computeAirportScheme(origin, code, 'scheme1', distances);
+      const a2 = computeAirportScheme(origin, code, 'scheme2', distances);
+      s1[code] = a1 != null ? a1 : officialPrice;
+      s2[code] = a2 != null ? a2 : officialPrice;
     } else if (distances[key] != null) {
       s1[code] = priceOf(distances[key], 'scheme1');
       s2[code] = priceOf(distances[key], 'scheme2');
