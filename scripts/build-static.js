@@ -12,7 +12,7 @@ const OUT = path.join(ROOT, 'public/data');
 const { getStations } = require(path.join(ROOT, 'src/services/stationData'));
 const { getDistances } = require(path.join(ROOT, 'src/services/distances'));
 const { priceOf, SCHEME_LABELS } = require(path.join(ROOT, 'src/services/fareCalc'));
-const { getAllPrices } = require(path.join(ROOT, 'src/services/metroApi'));
+const { getAllPrices, SHJIAO_CODES } = require(path.join(ROOT, 'src/services/metroApi'));
 
 const stations = getStations();
 const distances = getDistances();
@@ -24,7 +24,11 @@ function calcSchemes(origin, prices) {
     cur[code] = typeof v === 'object' ? Number(v.normal) : Number(v);
     if (v === null) { s1[code] = null; s2[code] = null; continue; }
     const key = [origin, code].sort().join(':');
-    if (distances[key] != null) {
+    if (SHJIAO_CODES.has(origin) || SHJIAO_CODES.has(code)) {
+      // 机场线按段计价：现行=方案一=方案二（官方口径）
+      const p = typeof v === 'object' ? Number(v.normal) : Number(v);
+      s1[code] = p; s2[code] = p;
+    } else if (distances[key] != null) {
       s1[code] = priceOf(distances[key], 'scheme1');
       s2[code] = priceOf(distances[key], 'scheme2');
     } else {

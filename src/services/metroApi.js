@@ -222,4 +222,4 @@ async function getAllPrices(originCode) {
   return allPrices;
 }
 
-module.exports = { fetchFare, fetchPrice, getAllPrices };
+module.exports = { fetchFare, fetchPrice, getAllPrices, SHJIAO_CODES };
