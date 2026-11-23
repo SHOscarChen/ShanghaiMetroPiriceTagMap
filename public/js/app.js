@@ -2,7 +2,7 @@ const SVG_W = 2638.57, SVG_H = 3692.52;
 let allStations = [];
 let stationCoords = {};
 let fareData = null;        // { old: {code: 元}, new: {code: 元} }
-let currentScheme = 'old';  // old | new | diff
+let currentScheme = 'new';  // old | new | diff
 let currentOrigin = null;
 let maxPrice = 15;
 let zoomLevel = 1;
@@ -163,9 +163,9 @@ window.addEventListener('resize', () => {
 
 function resetState() {
   fareData = null;
-  currentScheme = 'old';
+  currentScheme = 'new';
   currentOrigin = null;
-  document.querySelectorAll('.scheme-btn').forEach((b) => b.classList.toggle('active', b.dataset.scheme === 'old'));
+  document.querySelectorAll('.scheme-btn').forEach((b) => b.classList.toggle('active', b.dataset.scheme === 'new'));
   document.getElementById('scheme-btn').style.display = 'none';
   document.getElementById('legend').style.display = 'none';
   const lineSelect = document.getElementById('line-select');
@@ -381,7 +381,7 @@ async function queryPrices(originCode) {
     currentOrigin = originCode;
     document.getElementById('scheme-btn').style.display = 'inline-flex';
     document.getElementById('btn-save').disabled = false;
-    setScheme('old');
+    setScheme('new');
   } catch (err) {
     statusBar.textContent = '查询失败: ' + err.message;
   } finally {
