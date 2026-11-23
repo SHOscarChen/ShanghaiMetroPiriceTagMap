@@ -183,6 +183,9 @@ function resetState() {
 
 function setupZoomPan() {
   const wrap = document.getElementById('map-wrap');
+  let dragMoved = false;
+  let downClientX = 0, downClientY = 0;
+
   wrap.addEventListener('wheel', (e) => {
     e.preventDefault();
     const rect = wrap.getBoundingClientRect();
@@ -197,18 +200,34 @@ function setupZoomPan() {
   }, { passive: false });
 
   wrap.addEventListener('mousedown', (e) => {
-    if (e.button === 0) { isDragging = true; dragStartX = e.clientX - panX; dragStartY = e.clientY - panY; wrap.style.cursor = 'grabbing'; }
+    if (e.button === 0) {
+      isDragging = true;
+      dragMoved = false;
+      downClientX = e.clientX; downClientY = e.clientY;
+      dragStartX = e.clientX - panX; dragStartY = e.clientY - panY;
+      wrap.style.cursor = 'grabbing';
+    }
   });
   window.addEventListener('mousemove', (e) => {
     if (!isDragging) return;
+    if (Math.hypot(e.clientX - downClientX, e.clientY - downClientY) > 6) dragMoved = true;
     panX = e.clientX - dragStartX; panY = e.clientY - dragStartY;
     applyTransform();
   });
   window.addEventListener('mouseup', () => { if (isDragging) { isDragging = false; document.getElementById('map-wrap').style.cursor = 'grab'; } });
 
+  // 点击地图：优先选最近的站点（屏幕距离 22px 内），圆点或站名附近都生效
+  wrap.addEventListener('click', (e) => {
+    if (dragMoved) { dragMoved = false; return; }
+    selectNearestStation(e);
+  });
+
   // ===== 触摸支持：单指平移、双指缩放 =====
   let pinchDist = 0, pinchZoom = 1;
   wrap.addEventListener('touchstart', (e) => {
+    dragMoved = false;
+    downClientX = e.touches[0] ? e.touches[0].clientX : 0;
+    downClientY = e.touches[0] ? e.touches[0].clientY : 0;
     if (e.target.closest('#overlay-dots circle')) return;
     if (e.touches.length === 1) {
       isDragging = true;
@@ -241,6 +260,7 @@ function setupZoomPan() {
         applyTransform();
       }
     } else if (e.touches.length === 1 && isDragging) {
+      if (Math.hypot(e.touches[0].clientX - downClientX, e.touches[0].clientY - downClientY) > 6) dragMoved = true;
       panX = e.touches[0].clientX - dragStartX;
       panY = e.touches[0].clientY - dragStartY;
       applyTransform();
@@ -250,6 +270,22 @@ function setupZoomPan() {
   const endTouch = () => { if (isDragging) isDragging = false; pinchDist = 0; };
   wrap.addEventListener('touchend', endTouch);
   wrap.addEventListener('touchcancel', endTouch);
+}
+
+function selectNearestStation(e) {
+  if (!allStations.length) return;
+  const wrap = document.getElementById('map-wrap');
+  const rect = wrap.getBoundingClientRect();
+  const x = (e.clientX - rect.left - panX) / zoomLevel;
+  const y = (e.clientY - rect.top - panY) / zoomLevel;
+  let best = null, bestDist = Infinity;
+  for (const s of visibleStations()) {
+    const c = stationCoords[s.code];
+    const d = Math.hypot(c.x - x, c.y - y);
+    if (d < bestDist) { bestDist = d; best = s; }
+  }
+  // 22 屏幕像素内才响应，避免点空白处乱跳
+  if (best && bestDist * zoomLevel <= 22) setOriginFromCode(best.code);
 }
 
 function applyTransform() {
@@ -306,8 +342,9 @@ function setScheme(scheme) {
       else same++;
     }
     maxPrice = Math.max(...newVals, 0);
+    const noDown = down === 0 ? '（本起点无降价）' : '';
     document.getElementById('status-bar').textContent =
-      `${stationName} → 全网 ${codes.length} 站 | 涨价 ${up} · 不变 ${same} · 降价 ${down} | 单站最高涨价 +${maxUp} 元`;
+      `${stationName} → 全网 ${codes.length} 站 | 涨价 ${up} · 不变 ${same} · 降价 ${down}${noDown} | 单站最高涨价 +${maxUp} 元`;
   } else {
     const active = scheme === 'old' ? oldVals : newVals;
     maxPrice = active.length > 0 ? Math.max(...active) : 15;
@@ -401,18 +438,7 @@ function renderDots() {
       textColor = '#0a2540';
     }
 
-    const circle = document.createElementNS(ns, 'circle');
-    circle.setAttribute('cx', coord.x);
-    circle.setAttribute('cy', coord.y);
-    circle.setAttribute('r', 13);
-    circle.setAttribute('data-code', s.code);
-    circle.style.cursor = 'pointer';
-    circle.setAttribute('fill', fill);
-    circle.setAttribute('stroke', stroke);
-    circle.setAttribute('stroke-width', '2');
-    circle.setAttribute('pointer-events', 'auto');
-    circle.addEventListener('click', () => setOriginFromCode(s.code));
-    circle.addEventListener('mouseenter', (e) => {
+    const showTip = (e) => {
       const el = document.getElementById('tooltip');
       const d = Number(newPrice) - Number(oldPrice);
       const sign = d > 0 ? `+${d}` : String(d);
@@ -421,9 +447,38 @@ function renderDots() {
       const r = el.getBoundingClientRect();
       el.style.left = (e.clientX - r.width / 2) + 'px';
       el.style.top = (e.clientY - r.height - 14) + 'px';
+    };
+    const hideTip = () => { document.getElementById('tooltip').style.display = 'none'; };
+
+    // 透明热区：比可见圆点大，方便在地图上直接点站名附近选中
+    const hit = document.createElementNS(ns, 'circle');
+    hit.setAttribute('cx', coord.x);
+    hit.setAttribute('cy', coord.y);
+    hit.setAttribute('r', 32);
+    hit.setAttribute('data-code', s.code);
+    hit.setAttribute('fill', 'transparent');
+    hit.setAttribute('pointer-events', 'all');
+    hit.style.cursor = 'pointer';
+    hit.addEventListener('mouseenter', (e) => {
+      hit.setAttribute('r', 36);
+      showTip(e);
     });
-    circle.addEventListener('mousemove', moveTooltip);
-    circle.addEventListener('mouseleave', () => document.getElementById('tooltip').style.display = 'none');
+    hit.addEventListener('mousemove', moveTooltip);
+    hit.addEventListener('mouseleave', () => {
+      hit.setAttribute('r', 32);
+      hideTip();
+    });
+    g.appendChild(hit);
+
+    const circle = document.createElementNS(ns, 'circle');
+    circle.setAttribute('cx', coord.x);
+    circle.setAttribute('cy', coord.y);
+    circle.setAttribute('r', 13);
+    circle.setAttribute('data-code', s.code);
+    circle.setAttribute('fill', fill);
+    circle.setAttribute('stroke', stroke);
+    circle.setAttribute('stroke-width', '2');
+    circle.setAttribute('pointer-events', 'none');
     g.appendChild(circle);
 
     const t = document.createElementNS(ns, 'text');

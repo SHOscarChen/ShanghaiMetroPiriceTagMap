@@ -63,6 +63,14 @@ const COORD_OVERRIDES = {
   '0116': { lng: 121.441431, lat: 31.174651, name: '漕宝路' },
 };
 
+// 2号线东延伸段（广兰路—浦东机场）原始数据为站间直线距离，
+// 运营里程约长 10.4%；该系数用线上新票价（浦东机场方向）校准：
+// 人民广场→机场 10 元、广兰路→机场 8 元、远东大道→机场 5 元、川沙→机场 6 元、海天三路→机场 3 元。
+const SEGMENT_SCALES = {
+  '0255:0256': 1.104, '0256:0257': 1.104, '0257:0258': 1.104, '0258:0259': 1.104,
+  '0259:0260': 1.104, '0260:0261': 1.104, '0261:0262': 1.104, '0262:0263': 1.104,
+};
+
 // 构建可复用的图（与验证脚本同逻辑）：同线相邻站 = 经纬度距离；换乘同站(<=300m 聚类) = 0 边
 function buildGraph() {
   const g = load();
@@ -99,7 +107,10 @@ function buildGraph() {
       const a = st[i].code, b = st[i + 1].code;
       if (FAKE_EDGES.has(a + ':' + b)) continue;
       const override = SEGMENT_OVERRIDES[a + ':' + b];
-      addEdge(a, b, override != null ? override : st[i].distNext);
+      let w = override != null ? override : st[i].distNext;
+      const scale = SEGMENT_SCALES[a + ':' + b];
+      if (w != null && scale) w *= scale;
+      addEdge(a, b, w);
     }
   }
   for (const [a, b, w] of EXTRA_EDGES) addEdge(a, b, w);

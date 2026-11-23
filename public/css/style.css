@@ -9,9 +9,6 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-
 .subtitle b { color: #fff; }
 .subtitle a { color: #bfe9ff; text-decoration: none; border-bottom: 1px dotted rgba(191,233,255,0.6); }
 .subtitle a:hover { color: #fff; }
-.notice { display: flex; align-items: center; justify-content: space-between; gap: 10px 16px; flex-wrap: wrap; padding: 7px 20px; font-size: 12px; color: #7a4b00; background: #fff7e6; border-bottom: 1px solid #ffe0a3; flex-shrink: 0; }
-.notice a { color: #0a6fb5; font-weight: 700; text-decoration: none; white-space: nowrap; }
-.notice a:hover { text-decoration: underline; }
 .legend { position: absolute; top: 12px; left: 12px; z-index: 20; display: flex; align-items: center; gap: 14px; background: rgba(255,255,255,0.94); border: 1px solid #cfe0ef; border-radius: 6px; padding: 7px 12px; font-size: 12px; color: #4a6a8a; box-shadow: 0 2px 8px rgba(10,37,64,0.12); }
 .legend .dot { display: inline-block; width: 12px; height: 12px; border-radius: 50%; margin-right: 4px; vertical-align: -2px; border: 2px solid #999; }
 .legend .dot.up { background: #fff0f0; border-color: #e6002e; }
@@ -43,7 +40,6 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-
   .title-wrap { width: 100%; }
   .header h1 { width: auto; font-size: 17px; letter-spacing: 1px; }
   .subtitle { font-size: 11px; }
-  .notice { padding: 6px 12px; font-size: 11px; }
   .header .controls { width: 100%; margin-left: 0; gap: 8px; flex-wrap: wrap; }
   .header label { font-size: 13px; flex-shrink: 0; }
   .header select { flex: 1 1 0; min-width: 0; padding: 8px 6px; font-size: 14px; }
