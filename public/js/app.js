@@ -526,15 +526,6 @@ async function savePriceImage() {
   } catch { /* 底图加载失败时保留白底 */ }
 
   const origin = allStations.find((s) => s.code === currentOrigin);
-  const visibleCodes = new Set(visibleStations().map((s) => s.code));
-  const codes = Object.keys(fareData.old).filter((c) => c !== currentOrigin && visibleCodes.has(c));
-  let up = 0, same = 0, down = 0, maxUp = 0;
-  for (const c of codes) {
-    const d = Number(fareData.new[c]) - Number(fareData.old[c]);
-    if (d > 0) { up++; if (d > maxUp) maxUp = d; }
-    else if (d < 0) down++;
-    else same++;
-  }
 
   for (const s of visibleStations()) {
     const coord = stationCoords[s.code];
@@ -578,33 +569,6 @@ async function savePriceImage() {
     ctx.fillStyle = textColor;
     ctx.fillText(label, coord.x * scale, (coord.y + 1) * scale);
   }
-
-  // 左上角信息卡
-  const pad = 26 * scale;
-  ctx.fillStyle = 'rgba(255,255,255,0.94)';
-  ctx.strokeStyle = '#cfe0ef';
-  ctx.lineWidth = 2 * scale;
-  const cardW = 760 * scale, cardH = 132 * scale;
-  if (ctx.roundRect) {
-    ctx.beginPath();
-    ctx.roundRect(pad, pad, cardW, cardH, 12 * scale);
-    ctx.fill(); ctx.stroke();
-  } else {
-    ctx.fillRect(pad, pad, cardW, cardH);
-    ctx.strokeRect(pad, pad, cardW, cardH);
-  }
-  ctx.textAlign = 'left';
-  ctx.textBaseline = 'middle';
-  ctx.fillStyle = '#0a2540';
-  ctx.font = `700 ${30 * scale}px Helvetica, "PingFang SC", "Microsoft YaHei", sans-serif`;
-  ctx.fillText(`${origin.name} → 全网 · ${SCHEME_LABEL[currentScheme]}`, pad + 24 * scale, pad + 38 * scale);
-  ctx.font = `${21 * scale}px Helvetica, "PingFang SC", "Microsoft YaHei", sans-serif`;
-  ctx.fillStyle = '#4a6a8a';
-  const sub = currentScheme === 'diff'
-    ? `涨价 ${up} · 不变 ${same} · 降价 ${down} | 最高 +${maxUp} 元`
-    : `新票价自 ${META.effectiveDate} 起执行 | 涨价 ${up} · 不变 ${same} · 降价 ${down}`;
-  ctx.fillText(sub, pad + 24 * scale, pad + 82 * scale);
-  ctx.fillText(`${META.docNo} | 旧价快照至 2026-11-30`, pad + 24 * scale, pad + 112 * scale);
 
   const url = canvas.toDataURL('image/png');
   const a = document.createElement('a');
