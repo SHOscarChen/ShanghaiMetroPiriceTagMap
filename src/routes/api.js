@@ -2,7 +2,7 @@ const express = require('express');
 const router = express.Router();
 const { fetchFare, getAllPrices, SHJIAO_CODES } = require('../services/metroApi');
 const { getStations, getStationName, getMapData } = require('../services/stationData');
-const { getDistances } = require('../services/distances');
+const { getDistances, getRawDistances } = require('../services/distances');
 const { priceOf, SCHEME_LABELS } = require('../services/fareCalc');
 const { computeAirportScheme } = require('../services/airportFare');
 
@@ -35,12 +35,15 @@ router.get('/prices/:origin', async (req, res) => {
   }
   result.schemes.current = cur;
 
-  // 方案一 / 方案二：基于里程阶梯
+  // 方案一 / 方案二 / 新票价：基于里程阶梯
   // 注意：涉及市域机场线(51xx)的站对，按「地铁段方案阶梯价 + 机场线段官方段价」累加，
-  //       取经中春路/景洪路换乘中较低者（机场线自身费率不随地铁听证方案调整）。
+  //       取经中春路/景洪路换乘中较低者（机场线自身费率不随地铁票价机制调整）。
   let distances = null;
+  let rawDistances = null;
   try { distances = getDistances(); } catch { distances = null; }
-  for (const scheme of ['scheme1', 'scheme2']) {
+  try { rawDistances = getRawDistances(); } catch { rawDistances = null; }
+  for (const scheme of ['scheme1', 'scheme2', 'new']) {
+    const distMap = scheme === 'new' ? rawDistances : distances;
     const out = {};
     for (const [code, v] of Object.entries(prices)) {
       let price = null;
@@ -48,19 +51,21 @@ router.get('/prices/:origin', async (req, res) => {
       if (SHJIAO_CODES.has(origin) || SHJIAO_CODES.has(code)) {
         const officialPrice = typeof v === 'object' ? Number(v.normal) : Number(v);
         // 地铁段 + 机场线段累加；两端均为机场线站时走官方段价
-        const ap = computeAirportScheme(origin, code, scheme, distances);
+        const ap = computeAirportScheme(origin, code, scheme, distMap);
         price = ap != null ? ap : officialPrice;
-      } else if (distances && distances[key] != null) {
-        price = priceOf(distances[key], scheme);
+      } else if (distMap && distMap[key] != null) {
+        price = priceOf(distMap[key], scheme);
       } else if (typeof v === 'object') {
-        price = priceOf(Number(v.normal), 'current');
+        price = priceOf(Number(v.normal), scheme === 'new' ? 'current' : scheme);
       } else {
-        price = priceOf(Number(v), 'current');
+        price = priceOf(Number(v), scheme === 'new' ? 'current' : scheme);
       }
       out[code] = price;
     }
     result.schemes[scheme] = out;
   }
+  result.old = result.schemes.current;
+  result.new = result.schemes.new;
   result.schemesLabel = SCHEME_LABELS;
   res.json(result);
 });

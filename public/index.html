@@ -4,30 +4,41 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <base href="./">
-  <title>上海地铁票价速查</title>
+  <title>上海地铁新旧票价对比</title>
   <link rel="stylesheet" href="css/style.css">
 </head>
 <body>
   <div class="header">
-    <h1 id="app-title" title="点击重置">上海地铁票价速查</h1>
+    <div class="title-wrap">
+      <h1 id="app-title" title="点击重置">上海地铁新旧票价对比</h1>
+      <div class="subtitle">新票价 <b id="meta-date">2026-12-01</b> 起执行 · <a id="source-link" href="https://fgw.sh.gov.cn/fgw_jjjctk/20261123/f57b63885c514c829ee269ed589ab2b9.html" target="_blank" rel="noopener">沪发改价调〔2026〕58号</a></div>
+    </div>
     <div class="controls">
       <label for="line-select">起始站：</label>
       <select id="line-select"><option value="">— 选择线路 —</option></select>
       <select id="station-select" disabled><option value="">— 选择站点 —</option></select>
       <span id="loading" class="loading" style="display:none">查询中…</span>
       <div id="scheme-btn" class="scheme-btn-group" style="display:none">
-        <button class="scheme-btn active" data-scheme="current">现行</button>
-        <button class="scheme-btn" data-scheme="scheme1">方案一</button>
-        <button class="scheme-btn" data-scheme="scheme2">方案二</button>
-        <button class="scheme-btn" data-scheme="combo">三合一</button>
+        <button class="scheme-btn active" data-scheme="old">现行价</button>
+        <button class="scheme-btn" data-scheme="new">新票价</button>
+        <button class="scheme-btn" data-scheme="diff">涨跌</button>
       </div>
       <button id="btn-save" class="save-btn" disabled>保存价目表</button>
     </div>
   </div>
+  <div class="notice">
+    <span>对比口径：现行票价（2005 机制，至 2026-11-30） vs 新票价（最终执行方案）。机场线、磁浮线、金山铁路不适用新机制。</span>
+    <a id="archive-link" href="archive/2025-fare/">旧版页面存档 →</a>
+  </div>
   <div id="map-wrap">
+    <div id="legend" class="legend" style="display:none">
+      <span><i class="dot up"></i>涨价</span>
+      <span><i class="dot down"></i>降价</span>
+      <span><i class="dot same"></i>不变</span>
+    </div>
     <div class="help-text">双指缩放 · 拖动平移 · 点击圆圈切换起点</div>
   </div>
-  <div id="status-bar">选择起始站 → 显示到各站票价</div>
+  <div id="status-bar">选择起始站 → 显示到各站新旧票价</div>
   <div id="tooltip"></div>
   <script src="js/app.js"></script>
 </body>

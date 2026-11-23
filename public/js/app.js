@@ -1,16 +1,22 @@
 const SVG_W = 2638.57, SVG_H = 3692.52;
 let allStations = [];
 let stationCoords = {};
-let currentPrices = null;    // 现行票价（兼容旧逻辑；{code: 字符串 或 {normal,fast}}）
-let schemePrices = null;     // 三套：{ current, scheme1, scheme2 } 均为 {code: 数字}
-let currentScheme = 'current';
+let fareData = null;        // { old: {code: 元}, new: {code: 元} }
+let currentScheme = 'old';  // old | new | diff
 let currentOrigin = null;
 let maxPrice = 15;
 let zoomLevel = 1;
 let panX = 0, panY = 0;
 let isDragging = false, dragStartX, dragStartY;
 
-const SCHEME_LABEL = { current: '现行价', scheme1: '方案一', scheme2: '方案二', combo: '三合一' };
+const SCHEME_LABEL = { old: '现行价', new: '新票价', diff: '涨跌对比' };
+const META = {
+  effectiveDate: '2026-12-01',
+  publishedDate: '2026-11-23',
+  docNo: '沪发改价调〔2026〕58号',
+  sourceUrl: 'https://fgw.sh.gov.cn/fgw_jjjctk/20261123/f57b63885c514c829ee269ed589ab2b9.html',
+  archiveUrl: 'archive/2025-fare/',
+};
 
 const LINE_ORDER = ['01','02','03','04','05','06','07','08','09','10','11','12','13','14','15','16','17','18','41','51'];
 
@@ -22,6 +28,19 @@ function getLineName(code) {
 function getLineOrder(line) {
   const idx = LINE_ORDER.indexOf(line);
   return idx === -1 ? 99 : idx;
+}
+
+function deltaOf(code) {
+  if (!fareData) return null;
+  const o = fareData.old[code], n = fareData.new[code];
+  if (o == null || n == null) return null;
+  return Number(n) - Number(o);
+}
+
+function diffColor(d) {
+  if (d > 0) return { fill: '#fff0f0', stroke: '#e6002e', text: '#c4001f' };
+  if (d < 0) return { fill: '#eefaf1', stroke: '#009944', text: '#007a36' };
+  return { fill: '#f3f4f6', stroke: '#9aa3ad', text: '#5f6670' };
 }
 
 function setOriginFromCode(code) {
@@ -41,10 +60,47 @@ async function init() {
     rs = await fetch('api/stations');
   }
   allStations = await rs.json();
-  const rc = await fetch('stations-coords.json');
-  const raw = await rc.json();
-  for (const s of raw) stationCoords[s.code] = s;
 
+  const rc = await fetch('stations-coords.json');
+  const rawCoords = await rc.json();
+  for (const s of rawCoords) stationCoords[s.code] = s;
+
+  await loadMeta();
+  buildStationSelects();
+
+  document.getElementById('app-title').addEventListener('click', resetState);
+  document.getElementById('btn-save').addEventListener('click', savePriceImage);
+
+  document.querySelectorAll('.scheme-btn').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      if (!fareData) return;
+      setScheme(btn.dataset.scheme);
+    });
+  });
+
+  setupZoomPan();
+  createOverlay();
+  fitToView();
+  renderDots();
+
+  const helpText = document.querySelector('.help-text');
+  if (helpText) setTimeout(() => helpText.classList.add('hide-help'), 3000);
+}
+
+async function loadMeta() {
+  try {
+    const r = await fetch('data/meta.json');
+    if (r.ok) Object.assign(META, await r.json());
+  } catch { /* 使用默认元数据 */ }
+  const dateEl = document.getElementById('meta-date');
+  if (dateEl) dateEl.textContent = META.effectiveDate;
+  const sourceEl = document.getElementById('source-link');
+  if (sourceEl) sourceEl.href = META.sourceUrl;
+  const archiveEl = document.getElementById('archive-link');
+  if (archiveEl) archiveEl.href = META.archiveUrl;
+}
+
+function buildStationSelects() {
   const lineSelect = document.getElementById('line-select');
   const stationSelect = document.getElementById('station-select');
   const grouped = {};
@@ -79,27 +135,6 @@ async function init() {
   });
 
   stationSelect.addEventListener('change', () => { if (stationSelect.value) queryPrices(stationSelect.value); });
-
-  document.getElementById('app-title').addEventListener('click', resetState);
-  document.getElementById('btn-save').addEventListener('click', savePriceImage);
-
-  // 方案切换：仅切换显示，不改动已查数据
-  document.querySelectorAll('.scheme-btn').forEach((btn) => {
-    btn.addEventListener('click', () => {
-      if (!schemePrices) return;
-      setScheme(btn.dataset.scheme);
-    });
-  });
-
-  setupZoomPan();
-  createOverlay();
-  fitToView();
-  renderDots();
-
-  const helpText = document.querySelector('.help-text');
-  if (helpText) {
-    setTimeout(() => helpText.classList.add('hide-help'), 3000);
-  }
 }
 
 function fitToView() {
@@ -123,16 +158,16 @@ function fitToView() {
 }
 
 window.addEventListener('resize', () => {
-  if (!currentPrices) fitToView();
+  if (!fareData) fitToView();
 });
 
 function resetState() {
-  currentPrices = null;
-  schemePrices = null;
-  currentScheme = 'current';
+  fareData = null;
+  currentScheme = 'old';
   currentOrigin = null;
-  document.querySelectorAll('.scheme-btn').forEach((b) => b.classList.toggle('active', b.dataset.scheme === 'current'));
+  document.querySelectorAll('.scheme-btn').forEach((b) => b.classList.toggle('active', b.dataset.scheme === 'old'));
   document.getElementById('scheme-btn').style.display = 'none';
+  document.getElementById('legend').style.display = 'none';
   const lineSelect = document.getElementById('line-select');
   const stationSelect = document.getElementById('station-select');
   lineSelect.value = '';
@@ -141,7 +176,7 @@ function resetState() {
   const first = document.createElement('option');
   first.value = ''; first.textContent = '— 选择站点 —';
   stationSelect.appendChild(first);
-  document.getElementById('status-bar').textContent = '选择起始站 → 显示到各站票价';
+  document.getElementById('status-bar').textContent = '选择起始站 → 显示到各站新旧票价';
   document.getElementById('btn-save').disabled = true;
   renderDots();
 }
@@ -173,10 +208,8 @@ function setupZoomPan() {
 
   // ===== 触摸支持：单指平移、双指缩放 =====
   let pinchDist = 0, pinchZoom = 1;
-  const isTouch = ('ontouchstart' in window);
-
   wrap.addEventListener('touchstart', (e) => {
-    if (e.target.closest('.calibrate-dot') || e.target.closest('#overlay-dots circle')) return;
+    if (e.target.closest('#overlay-dots circle')) return;
     if (e.touches.length === 1) {
       isDragging = true;
       dragStartX = e.touches[0].clientX - panX;
@@ -234,6 +267,7 @@ function createOverlay() {
 
   const img = document.createElement('img');
   img.src = 'images/linesh.svg';
+  img.alt = '上海轨道交通线路图';
   img.style.cssText = `width:${SVG_W}px; height:${SVG_H}px; display:block; pointer-events:none;`;
   content.appendChild(img);
 
@@ -246,27 +280,39 @@ function createOverlay() {
   wrap.appendChild(content);
 }
 
+function visibleStations() {
+  return allStations.filter((s) => stationCoords[s.code] && !stationCoords[s.code].hidden);
+}
+
 function setScheme(scheme) {
-  if (!schemePrices) return;
+  if (!fareData) return;
   currentScheme = scheme;
   document.querySelectorAll('.scheme-btn').forEach((b) => b.classList.toggle('active', b.dataset.scheme === scheme));
-  const stationName = allStations.find(s => s.code === currentOrigin)?.name || currentOrigin;
-  if (scheme === 'combo') {
-    const counts = [];
-    const maxes = [];
-    for (const s of ['current', 'scheme1', 'scheme2']) {
-      if (!schemePrices[s]) continue;
-      const vals = Object.values(schemePrices[s]).map(v => Number(v)).filter(v => v > 0);
-      maxes.push(Math.max(...vals));
-      counts.push(Object.keys(schemePrices[s]).length);
+  document.getElementById('legend').style.display = scheme === 'diff' ? 'flex' : 'none';
+
+  const stationName = allStations.find((s) => s.code === currentOrigin)?.name || currentOrigin;
+  const visibleCodes = new Set(visibleStations().map((s) => s.code));
+  const codes = Object.keys(fareData.old).filter((c) => c !== currentOrigin && visibleCodes.has(c));
+  const oldVals = codes.map((c) => Number(fareData.old[c])).filter((v) => v > 0);
+  const newVals = codes.map((c) => Number(fareData.new[c])).filter((v) => v > 0);
+
+  if (scheme === 'diff') {
+    let up = 0, same = 0, down = 0, maxUp = 0;
+    for (const c of codes) {
+      const d = deltaOf(c);
+      if (d == null) continue;
+      if (d > 0) { up++; if (d > maxUp) maxUp = d; }
+      else if (d < 0) down++;
+      else same++;
     }
-    maxPrice = Math.max(...maxes);
-    document.getElementById('status-bar').textContent = `${stationName} → 全网 ${Math.max(...counts)} 站 | 三合一 现行最高 ${maxes[0]} / 方案一 ${maxes[1]} / 方案二 ${maxes[2]} 元`;
+    maxPrice = Math.max(...newVals, 0);
+    document.getElementById('status-bar').textContent =
+      `${stationName} → 全网 ${codes.length} 站 | 涨价 ${up} · 不变 ${same} · 降价 ${down} | 单站最高涨价 +${maxUp} 元`;
   } else {
-    const activePrices = schemePrices[scheme];
-    const vals = Object.values(activePrices).map((v) => Number(v)).filter(v => v > 0);
-    maxPrice = vals.length > 0 ? Math.max(...vals) : 15;
-    document.getElementById('status-bar').textContent = `${stationName} → 全网 ${Object.keys(activePrices).length} 站 | ${SCHEME_LABEL[scheme]} 最高 ${maxPrice} 元`;
+    const active = scheme === 'old' ? oldVals : newVals;
+    maxPrice = active.length > 0 ? Math.max(...active) : 15;
+    document.getElementById('status-bar').textContent =
+      `${stationName} → 全网 ${codes.length} 站 | ${SCHEME_LABEL[scheme]}最高 ${maxPrice} 元`;
   }
   renderDots();
 }
@@ -274,34 +320,31 @@ function setScheme(scheme) {
 async function queryPrices(originCode) {
   const loading = document.getElementById('loading');
   const statusBar = document.getElementById('status-bar');
-  const stationName = allStations.find(s => s.code === originCode)?.name || originCode;
+  const stationName = allStations.find((s) => s.code === originCode)?.name || originCode;
   loading.style.display = 'inline';
-  statusBar.textContent = `查询 ${stationName} 到全网的票价...`;
+  statusBar.textContent = `查询 ${stationName} 到全网的新旧票价...`;
 
   try {
-    let resp;
+    let data;
     try {
-      resp = await fetch(`data/prices/${originCode}.json`);
+      const resp = await fetch(`data/prices/${originCode}.json`);
       if (!resp.ok) throw new Error('static missing');
+      data = await resp.json();
     } catch {
-      resp = await fetch(`api/prices/${originCode}`);
+      const resp = await fetch(`api/prices/${originCode}`);
+      const api = await resp.json();
+      data = {
+        old: api.old || api.schemes?.current || api.prices,
+        new: api.new || api.schemes?.new,
+      };
     }
-    const data = await resp.json();
-    currentPrices = data.prices;
-    schemePrices = data.schemes || { current: data.prices };
-    currentScheme = 'current';
-    document.querySelectorAll('.scheme-btn').forEach((b) => b.classList.toggle('active', b.dataset.scheme === 'current'));
-    document.getElementById('scheme-btn').style.display = 'inline-flex';
+    if (!data.old || !data.new) throw new Error('数据不完整');
+
+    fareData = { old: data.old, new: data.new };
     currentOrigin = originCode;
+    document.getElementById('scheme-btn').style.display = 'inline-flex';
     document.getElementById('btn-save').disabled = false;
-    const activePrices = schemePrices[currentScheme] || currentPrices;
-    const vals = Object.values(activePrices).map((v) => {
-      if (v !== null && typeof v === 'object') return Math.max(Number(v.normal), Number(v.fast || v.normal));
-      return Number(v);
-    }).filter(v => v > 0);
-    maxPrice = vals.length > 0 ? Math.max(...vals) : 15;
-    renderDots();
-    statusBar.textContent = `${stationName} → 全网 ${Object.keys(activePrices).length} 站，最高 ${maxPrice} 元`;
+    setScheme('old');
   } catch (err) {
     statusBar.textContent = '查询失败: ' + err.message;
   } finally {
@@ -318,198 +361,83 @@ function renderDots() {
   const tooltip = document.getElementById('tooltip');
   tooltip.style.display = 'none';
 
-  for (const s of allStations) {
+  for (const s of visibleStations()) {
     const coord = stationCoords[s.code];
-    if (!coord || coord.hidden) continue;
+    if (!coord) continue;
     const isOrigin = s.code === currentOrigin;
 
-    // ===== 三合一模式：竖排三段标签（现行/方案一/方案二） =====
-    if (currentScheme === 'combo' && schemePrices) {
-      const segs = ['current', 'scheme1', 'scheme2'].map((k) => {
-        const v = schemePrices[k] ? schemePrices[k][s.code] : null;
-        return v === null || v === undefined ? null : Number(v);
-      });
-      if (isOrigin) {
-        // 起点用大圆红点
-        const circle = document.createElementNS(ns, 'circle');
-        circle.setAttribute('cx', coord.x); circle.setAttribute('cy', coord.y);
-        circle.setAttribute('r', 16); circle.style.cursor = 'pointer';
-        circle.setAttribute('fill', '#E6002E'); circle.setAttribute('stroke', '#333');
-        circle.setAttribute('stroke-width', '3'); circle.setAttribute('pointer-events', 'auto');
-        g.appendChild(circle);
-        const t = document.createElementNS(ns, 'text');
-        t.setAttribute('x', coord.x); t.setAttribute('y', coord.y + 5);
-        t.setAttribute('text-anchor', 'middle'); t.setAttribute('font-size', '14');
-        t.setAttribute('fill', '#fff'); t.setAttribute('font-weight', '900');
-        t.setAttribute('font-family', 'Arial, sans-serif'); t.setAttribute('pointer-events', 'none');
-        t.textContent = '起';
-        g.appendChild(t);
-        continue;
-      }
-      // 三段竖直标签
-      const bw = 20, bh = 15, gap = 1;
-      const topY = coord.y - (segs.length * (bh + gap)) / 2 + bh / 2;
-      const colors = ['#fff', '#d6ecff', '#fff3b0'];
-      const group = document.createElementNS(ns, 'g');
-      group.setAttribute('data-code', s.code);
-      for (let i = 0; i < segs.length; i++) {
-        const v = segs[i];
-        const y = topY + i * (bh + gap);
-        const rect = document.createElementNS(ns, 'rect');
-        rect.setAttribute('x', coord.x - bw / 2);
-        rect.setAttribute('y', y - bh / 2);
-        rect.setAttribute('width', bw);
-        rect.setAttribute('height', bh);
-        rect.setAttribute('fill', colors[i]);
-        rect.setAttribute('stroke', '#333');
-        rect.setAttribute('stroke-width', '1');
-        rect.setAttribute('pointer-events', 'auto');
-        rect.style.cursor = 'pointer';
-        rect.addEventListener('click', () => setOriginFromCode(s.code));
-        rect.addEventListener('mouseenter', (e) => {
-          const el = document.getElementById('tooltip');
-          const cur = segs[0], s1 = segs[1], s2 = segs[2];
-          el.innerHTML = `<b>${s.name}</b><br>现行 ${cur}元 · 方案一 ${s1}元 · 方案二 ${s2}元`;
-          el.style.display = 'block';
-          const r = el.getBoundingClientRect();
-          el.style.left = (e.clientX - r.width / 2) + 'px';
-          el.style.top = (e.clientY - r.height - 14) + 'px';
-        });
-        rect.addEventListener('mousemove', moveTooltip);
-        rect.addEventListener('mouseleave', () => document.getElementById('tooltip').style.display = 'none');
-        group.appendChild(rect);
-        if (v !== null && v !== undefined) {
-          const t = document.createElementNS(ns, 'text');
-          t.setAttribute('x', coord.x);
-          t.setAttribute('y', y + 4.5);
-          t.setAttribute('text-anchor', 'middle');
-          t.setAttribute('font-size', '11');
-          t.setAttribute('fill', '#333');
-          t.setAttribute('font-weight', '700');
-          t.setAttribute('font-family', 'Arial, sans-serif');
-          t.setAttribute('pointer-events', 'none');
-          t.textContent = v;
-          group.appendChild(t);
-        }
-      }
-      g.appendChild(group);
+    if (isOrigin) {
+      const circle = document.createElementNS(ns, 'circle');
+      circle.setAttribute('cx', coord.x); circle.setAttribute('cy', coord.y);
+      circle.setAttribute('r', 16);
+      circle.setAttribute('fill', '#E6002E'); circle.setAttribute('stroke', '#333');
+      circle.setAttribute('stroke-width', '3');
+      g.appendChild(circle);
+      const t = document.createElementNS(ns, 'text');
+      t.setAttribute('x', coord.x); t.setAttribute('y', coord.y + 5);
+      t.setAttribute('text-anchor', 'middle'); t.setAttribute('font-size', '14');
+      t.setAttribute('fill', '#fff'); t.setAttribute('font-weight', '900');
+      t.setAttribute('font-family', 'Arial, sans-serif');
+      t.textContent = '起';
+      g.appendChild(t);
       continue;
     }
 
-    const activePrices = currentScheme === 'current' ? currentPrices : (schemePrices ? schemePrices[currentScheme] : null);
-    const price = activePrices ? activePrices[s.code] : null;
-    // 双价仅在现行票存在；{ normal, fast } 对象；单价为字符串/数字
-    const isDual = currentScheme === 'current' && price !== null && price !== undefined && typeof price === 'object';
-    const normal = isDual ? price.normal : price;
-    const fast = isDual ? price.fast : null;
+    if (!fareData) continue;
+    const oldPrice = fareData.old[s.code];
+    const newPrice = fareData.new[s.code];
+    if (oldPrice == null || newPrice == null) continue;
 
-    if (!isOrigin && isDual && fast !== null) {
-      // 双票价：左右两个圆圈，左普通（白底），右快速（浅黄底）
-      const mk = (cx, fill, val) => {
-        const circle = document.createElementNS(ns, 'circle');
-        circle.setAttribute('cx', cx);
-        circle.setAttribute('cy', coord.y);
-        circle.setAttribute('r', 12);
-        circle.style.cursor = 'pointer';
-        circle.setAttribute('fill', fill);
-        circle.setAttribute('stroke', '#333');
-        circle.setAttribute('stroke-width', '2');
-        circle.setAttribute('pointer-events', 'auto');
-        circle.addEventListener('click', () => {
-          const line = getLineName(s.code);
-          document.getElementById('line-select').value = line;
-          document.getElementById('line-select').dispatchEvent(new Event('change'));
-          document.getElementById('station-select').value = s.code;
-          queryPrices(s.code);
-        });
-        circle.addEventListener('mouseenter', (e) => {
-          const el = document.getElementById('tooltip');
-          el.innerHTML = `<b>${s.name}</b><br>普通 ${normal}元 · 快速 ${fast}元`;
-          el.style.display = 'block';
-          const r = el.getBoundingClientRect();
-          el.style.left = (e.clientX - r.width / 2) + 'px';
-          el.style.top = (e.clientY - r.height - 14) + 'px';
-        });
-        circle.addEventListener('mousemove', moveTooltip);
-        circle.addEventListener('mouseleave', () => document.getElementById('tooltip').style.display = 'none');
-        g.appendChild(circle);
-        const t = document.createElementNS(ns, 'text');
-        t.setAttribute('x', cx);
-        t.setAttribute('y', coord.y + 4.5);
-        t.setAttribute('text-anchor', 'middle');
-        t.setAttribute('font-size', '15');
-        t.setAttribute('fill', '#333');
-        t.setAttribute('font-weight', '700');
-        t.setAttribute('font-family', 'Arial, sans-serif');
-        t.setAttribute('pointer-events', 'none');
-        t.textContent = val;
-        g.appendChild(t);
-      };
-      mk(coord.x - 14, '#fff', normal);
-      mk(coord.x + 14, '#FFF3B0', fast);
-      continue;
+    let label, fill, stroke, textColor;
+    if (currentScheme === 'diff') {
+      const d = Number(newPrice) - Number(oldPrice);
+      const color = diffColor(d);
+      fill = color.fill; stroke = color.stroke; textColor = color.text;
+      label = d > 0 ? `+${d}` : String(d);
+    } else {
+      label = String(currentScheme === 'old' ? oldPrice : newPrice);
+      fill = currentScheme === 'old' ? '#fff' : '#e8f3ff';
+      stroke = currentScheme === 'old' ? '#0a2540' : '#0a6fb5';
+      textColor = '#0a2540';
     }
 
     const circle = document.createElementNS(ns, 'circle');
     circle.setAttribute('cx', coord.x);
     circle.setAttribute('cy', coord.y);
-    circle.setAttribute('r', isOrigin ? 16 : 12);
+    circle.setAttribute('r', 13);
+    circle.setAttribute('data-code', s.code);
     circle.style.cursor = 'pointer';
-    circle.setAttribute('fill', isOrigin ? '#E6002E' : '#fff');
-    circle.setAttribute('stroke', '#333');
-    circle.setAttribute('stroke-width', isOrigin ? '3' : '2');
+    circle.setAttribute('fill', fill);
+    circle.setAttribute('stroke', stroke);
+    circle.setAttribute('stroke-width', '2');
     circle.setAttribute('pointer-events', 'auto');
-
-    if (!isOrigin) {
-      const priceVal = normal !== undefined && normal !== null ? parseInt(normal) : null;
-      circle.addEventListener('click', () => {
-        const line = getLineName(s.code);
-        document.getElementById('line-select').value = line;
-        document.getElementById('line-select').dispatchEvent(new Event('change'));
-        document.getElementById('station-select').value = s.code;
-        queryPrices(s.code);
-      });
-      circle.addEventListener('mouseenter', (e) => {
-        const el = document.getElementById('tooltip');
-        el.innerHTML = priceVal !== null ? `<b>${s.name}</b><br>${normal}元` : `<b>${s.name}</b><br>点击设为起点`;
-        el.style.display = 'block';
-        const r = el.getBoundingClientRect();
-        el.style.left = (e.clientX - r.width / 2) + 'px';
-        el.style.top = (e.clientY - r.height - 14) + 'px';
-      });
-      circle.addEventListener('mousemove', moveTooltip);
-      circle.addEventListener('mouseleave', () => document.getElementById('tooltip').style.display = 'none');
-    }
-
+    circle.addEventListener('click', () => setOriginFromCode(s.code));
+    circle.addEventListener('mouseenter', (e) => {
+      const el = document.getElementById('tooltip');
+      const d = Number(newPrice) - Number(oldPrice);
+      const sign = d > 0 ? `+${d}` : String(d);
+      el.innerHTML = `<b>${s.name}</b><br>现行 ${oldPrice} 元 → 新 ${newPrice} 元（${d === 0 ? '不变' : sign + ' 元'}）`;
+      el.style.display = 'block';
+      const r = el.getBoundingClientRect();
+      el.style.left = (e.clientX - r.width / 2) + 'px';
+      el.style.top = (e.clientY - r.height - 14) + 'px';
+    });
+    circle.addEventListener('mousemove', moveTooltip);
+    circle.addEventListener('mouseleave', () => document.getElementById('tooltip').style.display = 'none');
     g.appendChild(circle);
 
-    if (!isOrigin && normal !== undefined && normal !== null) {
-      const t = document.createElementNS(ns, 'text');
-      t.setAttribute('x', coord.x);
-      t.setAttribute('y', coord.y + 4.5);
-      t.setAttribute('text-anchor', 'middle');
-      t.setAttribute('font-size', '15');
-      t.setAttribute('fill', '#333');
-      t.setAttribute('font-weight', '700');
-      t.setAttribute('font-family', 'Arial, sans-serif');
-      t.setAttribute('pointer-events', 'none');
-      t.textContent = normal;
-      g.appendChild(t);
-    }
-
-    if (isOrigin) {
-      const t = document.createElementNS(ns, 'text');
-      t.setAttribute('x', coord.x);
-      t.setAttribute('y', coord.y + 5);
-      t.setAttribute('text-anchor', 'middle');
-      t.setAttribute('font-size', '14');
-      t.setAttribute('fill', '#fff');
-      t.setAttribute('font-weight', '900');
-      t.setAttribute('font-family', 'Arial, sans-serif');
-      t.setAttribute('pointer-events', 'none');
-      t.textContent = '起';
-      g.appendChild(t);
-    }
+    const t = document.createElementNS(ns, 'text');
+    t.setAttribute('x', coord.x);
+    t.setAttribute('y', coord.y + 4.5);
+    t.setAttribute('data-code', s.code);
+    t.setAttribute('text-anchor', 'middle');
+    t.setAttribute('font-size', currentScheme === 'diff' ? '12' : '15');
+    t.setAttribute('fill', textColor);
+    t.setAttribute('font-weight', '700');
+    t.setAttribute('font-family', 'Arial, sans-serif');
+    t.setAttribute('pointer-events', 'none');
+    t.textContent = label;
+    g.appendChild(t);
   }
 }
 
@@ -521,102 +449,112 @@ function moveTooltip(e) {
 }
 
 async function savePriceImage() {
-  if (!currentOrigin || !schemePrices) return;
+  if (!currentOrigin || !fareData) return;
   const scale = 2;
   const W = Math.round(SVG_W * scale), H = Math.round(SVG_H * scale);
   const canvas = document.createElement('canvas');
   canvas.width = W; canvas.height = H;
   const ctx = canvas.getContext('2d');
 
-  const bg = new Image();
-  await new Promise((resolve, reject) => {
-    bg.onload = resolve;
-    bg.onerror = reject;
-    bg.src = 'images/linesh.svg';
-  });
   ctx.fillStyle = '#fff';
   ctx.fillRect(0, 0, W, H);
-  ctx.drawImage(bg, 0, 0, W, H);
 
-  const origin = allStations.find(s => s.code === currentOrigin);
-  const isCombo = currentScheme === 'combo';
-  const activePrices = isCombo ? null : (currentScheme === 'current' ? currentPrices : (schemePrices ? schemePrices[currentScheme] : null));
-  for (const s of allStations) {
+  // 静态线网底图（与页面显示一致）
+  try {
+    const bg = new Image();
+    await new Promise((resolve, reject) => {
+      bg.onload = resolve;
+      bg.onerror = reject;
+      bg.src = 'images/linesh.svg';
+    });
+    ctx.drawImage(bg, 0, 0, W, H);
+  } catch { /* 底图加载失败时保留白底 */ }
+
+  const origin = allStations.find((s) => s.code === currentOrigin);
+  const visibleCodes = new Set(visibleStations().map((s) => s.code));
+  const codes = Object.keys(fareData.old).filter((c) => c !== currentOrigin && visibleCodes.has(c));
+  let up = 0, same = 0, down = 0, maxUp = 0;
+  for (const c of codes) {
+    const d = Number(fareData.new[c]) - Number(fareData.old[c]);
+    if (d > 0) { up++; if (d > maxUp) maxUp = d; }
+    else if (d < 0) down++;
+    else same++;
+  }
+
+  for (const s of visibleStations()) {
     const coord = stationCoords[s.code];
-    if (!coord || coord.hidden) continue;
+    if (!coord) continue;
     const isOrigin = s.code === currentOrigin;
 
-    // 三合一：三段竖直标签
-    if (isCombo && schemePrices) {
-      const segs = ['current', 'scheme1', 'scheme2'].map((k) => {
-        const v = schemePrices[k] ? schemePrices[k][s.code] : null;
-        return v === null || v === undefined ? null : Number(v);
-      });
-      if (isOrigin) {
-        ctx.beginPath();
-        ctx.arc(coord.x * scale, coord.y * scale, 16 * scale, 0, Math.PI * 2);
-        ctx.fillStyle = '#E6002E'; ctx.fill();
-        ctx.lineWidth = 3; ctx.strokeStyle = '#333'; ctx.stroke();
-        ctx.font = `900 ${14 * scale}px Arial, sans-serif`;
-        ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-        ctx.fillStyle = '#fff'; ctx.fillText('起', coord.x * scale, coord.y * scale);
-        continue;
-      }
-      const bw = 20, bh = 15, gap = 1;
-      const colors = ['#fff', '#d6ecff', '#fff3b0'];
-      const topY = coord.y - (segs.length * (bh + gap)) / 2 + bh / 2;
-      for (let i = 0; i < segs.length; i++) {
-        const v = segs[i];
-        const y = topY + i * (bh + gap);
-        ctx.beginPath();
-        ctx.rect((coord.x - bw / 2) * scale, (y - bh / 2) * scale, bw * scale, bh * scale);
-        ctx.fillStyle = colors[i]; ctx.fill();
-        ctx.lineWidth = 1; ctx.strokeStyle = '#333'; ctx.stroke();
-        if (v !== null && v !== undefined) {
-          ctx.font = `700 ${11 * scale}px Arial, sans-serif`;
-          ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-          ctx.fillStyle = '#333';
-          ctx.fillText(v, coord.x * scale, (y + 1) * scale);
-        }
-      }
+    if (isOrigin) {
+      ctx.beginPath();
+      ctx.arc(coord.x * scale, coord.y * scale, 16 * scale, 0, Math.PI * 2);
+      ctx.fillStyle = '#E6002E'; ctx.fill();
+      ctx.lineWidth = 3 * scale; ctx.strokeStyle = '#333'; ctx.stroke();
+      ctx.font = `900 ${14 * scale}px Arial, sans-serif`;
+      ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.fillStyle = '#fff'; ctx.fillText('起', coord.x * scale, coord.y * scale);
       continue;
     }
 
-    const price = activePrices[s.code];
-    if (price === undefined || price === null) continue;
-    const isDual = currentScheme === 'current' && typeof price === 'object';
-    const normal = isDual ? price.normal : price;
-    const fast = isDual ? price.fast : null;
+    const oldPrice = fareData.old[s.code];
+    const newPrice = fareData.new[s.code];
+    if (oldPrice == null || newPrice == null) continue;
 
-    const draw = (cx, cy, r, fill, val, fontSize, textY) => {
-      ctx.beginPath();
-      ctx.arc(cx * scale, cy * scale, r * scale, 0, Math.PI * 2);
-      ctx.fillStyle = fill;
-      ctx.fill();
-      ctx.lineWidth = isOrigin ? 3 : 2;
-      ctx.strokeStyle = '#333';
-      ctx.stroke();
-      if (val !== undefined && val !== null) {
-        ctx.font = `700 ${fontSize * scale}px Arial, sans-serif`;
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'middle';
-        ctx.fillStyle = isOrigin ? '#fff' : '#333';
-        ctx.fillText(val, cx * scale, (cy + textY) * scale);
-      }
-    };
-
-    if (!isOrigin && isDual && fast !== null) {
-      draw(coord.x - 14, coord.y, 12, '#fff', normal, 15, 0);
-      draw(coord.x + 14, coord.y, 12, '#FFF3B0', fast, 15, 0);
+    let label, fill, stroke, textColor;
+    if (currentScheme === 'diff') {
+      const d = Number(newPrice) - Number(oldPrice);
+      const color = diffColor(d);
+      fill = color.fill; stroke = color.stroke; textColor = color.text;
+      label = d > 0 ? `+${d}` : String(d);
     } else {
-      draw(coord.x, coord.y, isOrigin ? 16 : 12, isOrigin ? '#E6002E' : '#fff', isOrigin ? '起' : normal, isOrigin ? 14 : 15, 0);
+      label = String(currentScheme === 'old' ? oldPrice : newPrice);
+      fill = currentScheme === 'old' ? '#fff' : '#e8f3ff';
+      stroke = currentScheme === 'old' ? '#0a2540' : '#0a6fb5';
+      textColor = '#0a2540';
     }
+
+    ctx.beginPath();
+    ctx.arc(coord.x * scale, coord.y * scale, 13 * scale, 0, Math.PI * 2);
+    ctx.fillStyle = fill; ctx.fill();
+    ctx.lineWidth = 2 * scale; ctx.strokeStyle = stroke; ctx.stroke();
+    ctx.font = `700 ${(currentScheme === 'diff' ? 12 : 15) * scale}px Arial, sans-serif`;
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillStyle = textColor;
+    ctx.fillText(label, coord.x * scale, (coord.y + 1) * scale);
   }
+
+  // 左上角信息卡
+  const pad = 26 * scale;
+  ctx.fillStyle = 'rgba(255,255,255,0.94)';
+  ctx.strokeStyle = '#cfe0ef';
+  ctx.lineWidth = 2 * scale;
+  const cardW = 760 * scale, cardH = 132 * scale;
+  if (ctx.roundRect) {
+    ctx.beginPath();
+    ctx.roundRect(pad, pad, cardW, cardH, 12 * scale);
+    ctx.fill(); ctx.stroke();
+  } else {
+    ctx.fillRect(pad, pad, cardW, cardH);
+    ctx.strokeRect(pad, pad, cardW, cardH);
+  }
+  ctx.textAlign = 'left';
+  ctx.textBaseline = 'middle';
+  ctx.fillStyle = '#0a2540';
+  ctx.font = `700 ${30 * scale}px Helvetica, "PingFang SC", "Microsoft YaHei", sans-serif`;
+  ctx.fillText(`${origin.name} → 全网 · ${SCHEME_LABEL[currentScheme]}`, pad + 24 * scale, pad + 38 * scale);
+  ctx.font = `${21 * scale}px Helvetica, "PingFang SC", "Microsoft YaHei", sans-serif`;
+  ctx.fillStyle = '#4a6a8a';
+  const sub = currentScheme === 'diff'
+    ? `涨价 ${up} · 不变 ${same} · 降价 ${down} | 最高 +${maxUp} 元`
+    : `新票价自 ${META.effectiveDate} 起执行 | 涨价 ${up} · 不变 ${same} · 降价 ${down}`;
+  ctx.fillText(sub, pad + 24 * scale, pad + 82 * scale);
+  ctx.fillText(`${META.docNo} | 旧价快照至 2026-11-30`, pad + 24 * scale, pad + 112 * scale);
 
   const url = canvas.toDataURL('image/png');
   const a = document.createElement('a');
   a.href = url;
-  a.download = `${origin.name}_${SCHEME_LABEL[currentScheme]}.png`;
+  a.download = `${origin.name}_新旧票价_${SCHEME_LABEL[currentScheme]}.png`;
   document.body.appendChild(a);
   a.click();
   document.body.removeChild(a);

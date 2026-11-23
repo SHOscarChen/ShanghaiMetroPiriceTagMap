@@ -51,7 +51,7 @@ function computeAirportScheme(o, d, scheme, distances) {
   for (const t of AIRPORT_TRANSFERS) {
     // 地铁段：普通地铁站 → 换乘站(地铁码) 的距离
     const metroKey = [metroSide, t.metro].sort().join(':');
-    const metroDist = distances ? distances[metroKey] : null;
+    const metroDist = metroSide === t.metro ? 0 : (distances ? distances[metroKey] : null);
     if (metroDist == null) continue;
     const metroPrice = priceOf(metroDist, scheme);
 

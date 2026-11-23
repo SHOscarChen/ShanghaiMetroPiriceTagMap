@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <base href="./">
+  <title>上海地铁票价速查（2025版存档）</title>
+  <link rel="stylesheet" href="css/style.css">
+  <style>
+    .archive-bar { flex-shrink: 0; display: flex; align-items: center; justify-content: center; gap: 10px; flex-wrap: wrap; padding: 7px 14px; font-size: 12px; color: #7a4b00; background: #fff7e6; border-bottom: 1px solid #ffe0a3; }
+    .archive-bar a { color: #0a6fb5; font-weight: 700; text-decoration: none; }
+    .archive-bar a:hover { text-decoration: underline; }
+  </style>
+</head>
+<body>
+  <div class="archive-bar">
+    <span>存档：2005 票价机制（至 2026-11-30）</span>
+    <a href="../../">← 返回新版票价对比</a>
+  </div>
+  <div class="header">
+    <h1 id="app-title" title="点击重置">上海地铁票价速查（2025存档）</h1>
+    <div class="controls">
+      <label for="line-select">起始站：</label>
+      <select id="line-select"><option value="">— 选择线路 —</option></select>
+      <select id="station-select" disabled><option value="">— 选择站点 —</option></select>
+      <span id="loading" class="loading" style="display:none">查询中…</span>
+      <div id="scheme-btn" class="scheme-btn-group" style="display:none">
+        <button class="scheme-btn active" data-scheme="current">现行</button>
+        <button class="scheme-btn" data-scheme="scheme1">方案一</button>
+        <button class="scheme-btn" data-scheme="scheme2">方案二</button>
+        <button class="scheme-btn" data-scheme="combo">三合一</button>
+      </div>
+      <button id="btn-save" class="save-btn" disabled>保存价目表</button>
+    </div>
+  </div>
+  <div id="map-wrap">
+    <div class="help-text">双指缩放 · 拖动平移 · 点击圆圈切换起点</div>
+  </div>
+  <div id="status-bar">选择起始站 → 显示到各站票价</div>
+  <div id="tooltip"></div>
+  <script src="js/app.js"></script>
+</body>
+</html>

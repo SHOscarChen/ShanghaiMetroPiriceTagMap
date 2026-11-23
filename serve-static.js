@@ -17,7 +17,8 @@ http.createServer((req, res) => {
   let url = decodeURIComponent(req.url.split('?')[0]);
   if (BASE && url.startsWith(BASE)) url = url.slice(BASE.length);
   if (url === '/') url = '/index.html';
-  const file = path.join(ROOT, url);
+  let file = path.join(ROOT, url);
+  if (fs.existsSync(file) && fs.statSync(file).isDirectory()) file = path.join(file, 'index.html');
   if (!file.startsWith(ROOT) || !fs.existsSync(file)) {
     res.writeHead(404); res.end('404 Not Found: ' + url); return;
   }

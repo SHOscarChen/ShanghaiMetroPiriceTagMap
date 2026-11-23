@@ -37,13 +37,31 @@ function load() {
   return raw;
 }
 
-// 已知的拓扑修正：官方线路数据把 11 号线支线（花桥-上海赛车场）线性排在主线前，
-// 但真实拓扑中支线在「嘉定新城」(1134) 汇入主线，而非接到「嘉定北」(1131)。
-// 官方数据里 1120 无 distNext，buildGraph 建不出 1120↔1134 这条汇入边，导致支线成孤岛。
-// 这里补上这条汇入边（距离为实测/运营里程，官方价 1120:1134=3 元 <6km 约束下取 3.0km）。
+// 已知的拓扑修正：
+// 1) 11 号线支线（花桥-上海赛车场）在官方数据里线性排在主线前，
+//    真实拓扑在「嘉定新城」(1134) 汇入主线，需要补一条汇入边。
+// 2) 5 号线支线（东川路-奉贤新城）被接在闵行开发区之后，真实汇入点是东川路。
+// 3) 10 号线航中路支线被接在虹桥火车站之后，真实汇入点是龙溪路。
+// 4) 1 号线上海南站-漕宝路的原始数据距离为 0（坐标重复），拆成两段实测距离。
 const EXTRA_EDGES = [
-  ['1120', '1134', 3.0], // 上海赛车场 <-> 嘉定新城（11号线支线汇入主线）
+  ['1120', '1134', 3.0],  // 上海赛车场 <-> 嘉定新城（11号线支线汇入主线）
+  ['1020', '1045', 2.08], // 龙柏新村 <-> 龙溪路（10号线支线汇入主线）
+  ['0509', '0531', 1.44], // 东川路 <-> 江川路（5号线支线汇入主线）
 ];
+
+// 官方线路数据里因支线线性拼接产生的假边，建图时跳过
+const FAKE_EDGES = new Set(['1020:1041', '0513:0531']);
+
+// 原始相邻站距离修正（键为线路顺序中的 a->b）
+const SEGMENT_OVERRIDES = {
+  '0115:0116': 1.64, // 上海南站 -> 漕宝路
+  '0116:0117': 1.58, // 漕宝路 -> 上海体育馆
+};
+
+// 原始经纬度修正：1号线漕宝路(0116)的坐标与上海南站重复
+const COORD_OVERRIDES = {
+  '0116': { lng: 121.441431, lat: 31.174651, name: '漕宝路' },
+};
 
 // 构建可复用的图（与验证脚本同逻辑）：同线相邻站 = 经纬度距离；换乘同站(<=300m 聚类) = 0 边
 function buildGraph() {
@@ -53,6 +71,9 @@ function buildGraph() {
     for (const s of line.stations) {
       if (!coord[s.code] && s.lng != null) coord[s.code] = { lng: s.lng, lat: s.lat, name: s.name };
     }
+  }
+  for (const [code, c] of Object.entries(COORD_OVERRIDES)) {
+    coord[code] = { ...(coord[code] || {}), ...c };
   }
   const codes = Object.keys(coord);
   class UF {
@@ -74,7 +95,12 @@ function buildGraph() {
   const addEdge = (a, b, w) => { if (w == null || a === b) return; adj[a].push([b, w]); adj[b].push([a, w]); };
   for (const line of g) {
     const st = line.stations;
-    for (let i = 0; i < st.length - 1; i++) addEdge(st[i].code, st[i + 1].code, st[i].distNext);
+    for (let i = 0; i < st.length - 1; i++) {
+      const a = st[i].code, b = st[i + 1].code;
+      if (FAKE_EDGES.has(a + ':' + b)) continue;
+      const override = SEGMENT_OVERRIDES[a + ':' + b];
+      addEdge(a, b, override != null ? override : st[i].distNext);
+    }
   }
   for (const [a, b, w] of EXTRA_EDGES) addEdge(a, b, w);
   for (const mem of Object.values(cluster)) {
@@ -160,6 +186,28 @@ function getDistances() {
   return JSON.parse(fs.readFileSync(DIST_PATH, 'utf8')).distances;
 }
 
-module.exports = { generate, getDistances, farePriceOfKm, kmRangeOfFare, buildGraph, dijkstraDist };
+// 未经「旧票价档位」校准的原始最短路径里程，用于按新票价机制重新计价。
+// 返回 { 'codeA:codeB': km }（排序后的键，双向往返同值）。
+let rawCache = null;
+function getRawDistances() {
+  if (rawCache) return rawCache;
+  const { adj, coord } = buildGraph();
+  const codes = Object.keys(coord);
+  const out = {};
+  for (const src of codes) {
+    const dist = dijkstraDist(adj, src);
+    for (const dst of codes) {
+      if (dst === src) continue;
+      const d = dist[dst];
+      if (d == null) continue;
+      const key = [src, dst].sort().join(':');
+      if (out[key] == null) out[key] = Math.round(d * 10) / 10;
+    }
+  }
+  rawCache = out;
+  return out;
+}
+
+module.exports = { generate, getDistances, getRawDistances, farePriceOfKm, kmRangeOfFare, buildGraph, dijkstraDist };
 
 if (require.main === module) generate();

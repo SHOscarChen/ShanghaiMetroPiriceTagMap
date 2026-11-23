@@ -1,72 +1,156 @@
-// 预生成 GitHub Pages 静态部署所需的全部数据文件：
-//   public/data/stations.json              起始站列表（原 /api/stations）
-//   public/data/prices/{origin}.json       每站三套票价（原 /api/prices/:origin）
-//   public/data/schemes.json               方案名称/标签元数据
-// 生成后整个 public/ 目录即为纯静态站点，可直接托管到 GitHub Pages。
+// 预生成 GitHub Pages 静态部署所需的全部数据文件。
+//
+// 新站（public/data/）：
+//   stations.json            起始站列表
+//   prices/{origin}.json     该站到全网的「现行价 / 新票价」两套票价
+//   meta.json                执行日期、文号、数据来源、存档入口
+//
+// 旧版存档（public/archive/2025-fare/）：
+//   复制 archive/2025-fare/ 的页面与静态资源，并按旧版前端格式生成
+//   data/stations.json、data/schemes.json、data/prices/{origin}.json
+//
+// 旧价使用 data/fares.json 的官方快照（2026-11 之前抓取），
+// 新价使用原始最短路径里程 + 沪发改价调〔2026〕58号 阶梯，
+// 整个构建过程不依赖线上接口，可在 2026-12-01 之后重复生成。
 const fs = require('fs');
 const path = require('path');
 
 const ROOT = path.join(__dirname, '..');
 const OUT = path.join(ROOT, 'public/data');
+const ARCHIVE_SRC = path.join(ROOT, 'archive/2025-fare');
+const ARCHIVE_OUT = path.join(ROOT, 'public/archive/2025-fare');
 
 const { getStations } = require(path.join(ROOT, 'src/services/stationData'));
-const { getDistances } = require(path.join(ROOT, 'src/services/distances'));
+const { getDistances, getRawDistances } = require(path.join(ROOT, 'src/services/distances'));
 const { priceOf, SCHEME_LABELS } = require(path.join(ROOT, 'src/services/fareCalc'));
-const { getAllPrices, SHJIAO_CODES } = require(path.join(ROOT, 'src/services/metroApi'));
-const { computeAirportScheme } = require(path.join(ROOT, 'src/services/airportFare'));
+const { computeAirportScheme, AIRPORT_CODES } = require(path.join(ROOT, 'src/services/airportFare'));
 
+const FARES = JSON.parse(fs.readFileSync(path.join(ROOT, 'data/fares.json'), 'utf8'));
 const stations = getStations();
-const distances = getDistances();
+const stationName = Object.fromEntries(stations.map((s) => [s.code, s.name]));
+const distancesOld = getDistances();
+const distancesRaw = getRawDistances();
 
-// 与 src/routes/api.js 保持一致的方案计算
-function calcSchemes(origin, prices) {
-  const cur = {}, s1 = {}, s2 = {};
-  for (const [code, v] of Object.entries(prices)) {
-    cur[code] = typeof v === 'object' ? Number(v.normal) : Number(v);
-    if (v === null) { s1[code] = null; s2[code] = null; continue; }
-    const key = [origin, code].sort().join(':');
-    if (SHJIAO_CODES.has(origin) || SHJIAO_CODES.has(code)) {
-      // 地铁段(方案阶梯) + 机场线段(官方段价) 累加；两端均为机场线站时走官方段价
-      const officialPrice = typeof v === 'object' ? Number(v.normal) : Number(v);
-      const a1 = computeAirportScheme(origin, code, 'scheme1', distances);
-      const a2 = computeAirportScheme(origin, code, 'scheme2', distances);
-      s1[code] = a1 != null ? a1 : officialPrice;
-      s2[code] = a2 != null ? a2 : officialPrice;
-    } else if (distances[key] != null) {
-      s1[code] = priceOf(distances[key], 'scheme1');
-      s2[code] = priceOf(distances[key], 'scheme2');
-    } else {
-      const p = typeof v === 'object' ? Number(v.normal) : Number(v);
-      s1[code] = priceOf(p, 'current');
-      s2[code] = priceOf(p, 'current');
-    }
-  }
-  return { current: cur, scheme1: s1, scheme2: s2 };
+const META = {
+  effectiveDate: '2026-12-01',
+  publishedDate: '2026-11-23',
+  docNo: '沪发改价调〔2026〕58号',
+  sourceUrl: 'https://fgw.sh.gov.cn/fgw_jjjctk/20261123/f57b63885c514c829ee269ed589ab2b9.html',
+  archiveUrl: 'archive/2025-fare/',
+  oldLabel: '现行票价（至2026-11-30）',
+  newLabel: '新票价（2026-12-01起）',
+};
+
+const keyOf = (a, b) => [a, b].sort().join(':');
+
+// 官方快照里的票价：普通价（obj.price / 字符串 / 数字）
+function officialOf(v) {
+  if (v == null) return null;
+  if (typeof v === 'object') return Number(v.price != null ? v.price : v.normal);
+  return Number(v);
 }
 
-async function buildOne(origin) {
-  const prices = await getAllPrices(origin); // 复用 API 的取价/双价/兜底逻辑
-  const schemes = calcSchemes(origin, prices);
-  return { origin, originName: stations.find((s) => s.code === origin)?.name || origin, prices, schemes, schemesLabel: SCHEME_LABELS };
+// 旧版前端需要的 prices 字段：单价为字符串，双价为 { normal, fast }
+function legacyPriceOf(v) {
+  if (v == null) return null;
+  if (typeof v === 'object') {
+    const normal = String(v.price != null ? v.price : v.normal);
+    return { normal, fast: v.fast != null ? String(v.fast) : null };
+  }
+  return String(v);
+}
+
+function newPriceOf(origin, dest, oldPrice) {
+  if (AIRPORT_CODES.has(origin) || AIRPORT_CODES.has(dest)) {
+    const ap = computeAirportScheme(origin, dest, 'new', distancesRaw);
+    return ap != null ? ap : oldPrice;
+  }
+  const km = distancesRaw[keyOf(origin, dest)];
+  return km != null ? priceOf(km, 'new') : oldPrice;
+}
+
+function archiveSchemePrice(origin, dest, official, scheme) {
+  if (official === null) return null;
+  if (AIRPORT_CODES.has(origin) || AIRPORT_CODES.has(dest)) {
+    const ap = computeAirportScheme(origin, dest, scheme, distancesOld);
+    return ap != null ? ap : official;
+  }
+  const km = distancesOld[keyOf(origin, dest)];
+  return km != null ? priceOf(km, scheme) : priceOf(official, 'current');
+}
+
+function buildNewPair(origin) {
+  const old = {}, next = {};
+  for (const s of stations) {
+    const code = s.code;
+    if (code === origin) { old[code] = 0; next[code] = 0; continue; }
+    const f = FARES[keyOf(origin, code)];
+    const official = officialOf(f);
+    old[code] = official != null ? official : null;
+    next[code] = official != null ? newPriceOf(origin, code, official) : null;
+  }
+  return { origin, originName: stationName[origin] || origin, old, new: next };
+}
+
+function buildArchivePair(origin) {
+  const prices = {}, current = {}, scheme1 = {}, scheme2 = {};
+  for (const s of stations) {
+    const code = s.code;
+    if (code === origin) { prices[code] = '0'; current[code] = 0; scheme1[code] = 0; scheme2[code] = 0; continue; }
+    const f = FARES[keyOf(origin, code)];
+    const official = officialOf(f);
+    prices[code] = legacyPriceOf(f);
+    current[code] = official;
+    scheme1[code] = archiveSchemePrice(origin, code, official, 'scheme1');
+    scheme2[code] = archiveSchemePrice(origin, code, official, 'scheme2');
+  }
+  return {
+    origin,
+    originName: stationName[origin] || origin,
+    prices,
+    schemes: { current, scheme1, scheme2 },
+    schemesLabel: { current: '现行票价', scheme1: '方案一', scheme2: '方案二' },
+  };
+}
+
+function copyDir(src, dest) {
+  fs.mkdirSync(dest, { recursive: true });
+  for (const entry of fs.readdirSync(src, { withFileTypes: true })) {
+    if (entry.name === 'data') continue;
+    const from = path.join(src, entry.name);
+    const to = path.join(dest, entry.name);
+    if (entry.isDirectory()) copyDir(from, to);
+    else fs.copyFileSync(from, to);
+  }
 }
 
 async function main() {
   fs.mkdirSync(path.join(OUT, 'prices'), { recursive: true });
   fs.writeFileSync(path.join(OUT, 'stations.json'), JSON.stringify(stations), 'utf8');
-  fs.writeFileSync(path.join(OUT, 'schemes.json'), JSON.stringify(SCHEME_LABELS), 'utf8');
+  fs.writeFileSync(path.join(OUT, 'meta.json'), JSON.stringify(META), 'utf8');
 
-  let n = 0, bytes = 0;
+  copyDir(ARCHIVE_SRC, ARCHIVE_OUT);
+  const archiveData = path.join(ARCHIVE_OUT, 'data');
+  fs.mkdirSync(path.join(archiveData, 'prices'), { recursive: true });
+  fs.writeFileSync(path.join(archiveData, 'stations.json'), JSON.stringify(stations), 'utf8');
+  fs.writeFileSync(
+    path.join(archiveData, 'schemes.json'),
+    JSON.stringify({ current: '现行票价', scheme1: '方案一', scheme2: '方案二' }),
+    'utf8'
+  );
+
+  let n = 0;
   for (const s of stations) {
-    const obj = await buildOne(s.code);
-    const file = path.join(OUT, 'prices', `${s.code}.json`);
-    const data = JSON.stringify(obj);
-    fs.writeFileSync(file, data, 'utf8');
+    const newData = buildNewPair(s.code);
+    const archiveDataObj = buildArchivePair(s.code);
+    fs.writeFileSync(path.join(OUT, 'prices', `${s.code}.json`), JSON.stringify(newData), 'utf8');
+    fs.writeFileSync(path.join(archiveData, 'prices', `${s.code}.json`), JSON.stringify(archiveDataObj), 'utf8');
     n++;
-    bytes += data.length;
-    if (n % 50 === 0) console.log(`... ${n}/530`);
+    if (n % 50 === 0) console.log(`... ${n}/${stations.length}`);
   }
-  console.log(`生成完成: ${n} 个起始站文件 (${(bytes / 1024 / 1024).toFixed(1)} MB) → public/data/`);
-  console.log('stations.json / schemes.json 已写入');
+
+  console.log(`生成完成: ${n} 个起始站文件 → public/data/ 与 public/archive/2025-fare/data/`);
+  console.log(`旧价快照: data/fares.json (${Object.keys(FARES).length} 对)；新票价自 ${META.effectiveDate} 起执行`);
 }
 
 main().catch((e) => { console.error(e); process.exit(1); });

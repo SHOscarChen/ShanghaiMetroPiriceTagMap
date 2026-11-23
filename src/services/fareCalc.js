@@ -31,16 +31,28 @@ const SCHEME2_STEPS = [
   { max: 142, price: 16 }, { max: Infinity, price: 17 },
 ];
 
+// 最终执行方案（沪发改价调〔2026〕58号，2026-12-01 起）：
+// 起乘 3 元 / 0-4km；后续 4/4/4/7/7/10/10 km 各 +1 元；50km 以上每 15km +1 元。
+const NEW_STEPS = [
+  { max: 4, price: 3 }, { max: 8, price: 4 }, { max: 12, price: 5 },
+  { max: 16, price: 6 }, { max: 23, price: 7 }, { max: 30, price: 8 },
+  { max: 40, price: 9 }, { max: 50, price: 10 }, { max: 65, price: 11 },
+  { max: 80, price: 12 }, { max: 95, price: 13 }, { max: 110, price: 14 },
+  { max: 125, price: 15 }, { max: 140, price: 16 }, { max: Infinity, price: 17 },
+];
+
 const SCHEMES = {
   current: CURRENT_STEPS,
   scheme1: SCHEME1_STEPS,
   scheme2: SCHEME2_STEPS,
+  new: NEW_STEPS,
 };
 
 const SCHEME_LABELS = {
   current: '现行票价',
   scheme1: '方案一',
   scheme2: '方案二',
+  new: '新票价',
 };
 
 function priceOf(km, scheme) {
