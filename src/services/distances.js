@@ -5,6 +5,7 @@ const LATLNG_PATH = path.join(__dirname, '../../data/latlng_dist.json');
 const DIST_PATH = path.join(__dirname, '../../data/distances.json');
 const FARE_PATH = path.join(__dirname, '../../data/fares.json');
 const STATION_PATH = path.join(__dirname, '../../data/stations.json');
+const H5_OVERRIDE_PATH = path.join(__dirname, '../../data/h5-overrides.json');
 
 // 现行票价规则：0~6 公里 3 元，之后每 10 公里 +1 元（用于区间校正）
 // 档位区间（官方规则，含当前下界）：
@@ -203,7 +204,20 @@ function getDistances() {
 
 // 未经「旧票价档位」校准的原始最短路径里程，用于按新票价机制重新计价。
 // 返回 { 'codeA:codeB': km }（排序后的键，双向往返同值）。
+// data/h5-overrides.json 中的已核验边界站对会覆盖几何里程，避免直线距离在档位
+// 边界上差 0.1~0.5km 导致新票价错档。
 let rawCache = null;
+let h5OverridesCache = null;
+function loadH5Overrides() {
+  if (h5OverridesCache) return h5OverridesCache;
+  try {
+    const data = JSON.parse(fs.readFileSync(H5_OVERRIDE_PATH, 'utf8'));
+    h5OverridesCache = data.fares || {};
+  } catch {
+    h5OverridesCache = {};
+  }
+  return h5OverridesCache;
+}
 function getRawDistances() {
   if (rawCache) return rawCache;
   const { adj, coord } = buildGraph();
@@ -219,6 +233,7 @@ function getRawDistances() {
       if (out[key] == null) out[key] = Math.round(d * 10) / 10;
     }
   }
+  Object.assign(out, loadH5Overrides());
   rawCache = out;
   return out;
 }

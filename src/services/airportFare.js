@@ -34,12 +34,25 @@ function officialOf(v) {
   if (typeof v === 'object') return Number(v.price != null ? v.price : v.normal);
   return Number(v);
 }
+// 市域机场线新票价取「快线价」：有 fast 用 fast，否则用普通价。
+// 依据 2026-11 H5 全量核验的 25 条机场线边界样本（含纯机场线段与同站换乘）。
+function fastOf(v) {
+  if (v == null) return null;
+  if (typeof v === 'object' && v.fast != null) return Number(v.fast);
+  return officialOf(v);
+}
 
 // 计算涉及机场线的站对 (o, d) 在指定 scheme 下的票价；若不适用返回 null。
 // distances: distances.json 的 { '甲:乙': km }（排序 key）
 function computeAirportScheme(o, d, scheme, distances) {
   const inAir = (c) => AIRPORT_CODES.has(c);
   const oAir = inAir(o), dAir = inAir(d);
+
+  // 两端均为机场线站：直接取机场线段官方价（新票价用 fast 价）
+  if (oAir && dAir) {
+    const v = getFares()[[o, d].sort().join(':')];
+    return scheme === 'new' ? fastOf(v) : officialOf(v);
+  }
   // 仅处理「一端机场线、一端普通地铁」的站对
   if (oAir === dAir) return null;
 
@@ -53,11 +66,16 @@ function computeAirportScheme(o, d, scheme, distances) {
     const metroKey = [metroSide, t.metro].sort().join(':');
     const metroDist = metroSide === t.metro ? 0 : (distances ? distances[metroKey] : null);
     if (metroDist == null) continue;
-    const metroPrice = priceOf(metroDist, scheme);
+    // 同站换乘不另收地铁起步价（仅新票价规则；旧存档保持原逻辑）
+    const metroPrice = metroDist === 0 && scheme === 'new' ? 0 : priceOf(metroDist, scheme);
 
     // 机场线段：换乘站(机场线码) → 目的机场线站 的官方段价
     // 目的站本身即该换乘站时，机场线段为 0
-    const jcPrice = airSide === t.airport ? 0 : officialOf(fareMap[[t.airport, airSide].sort().join(':')]);
+    const jcPrice = airSide === t.airport
+      ? 0
+      : (scheme === 'new'
+        ? fastOf(fareMap[[t.airport, airSide].sort().join(':')])
+        : officialOf(fareMap[[t.airport, airSide].sort().join(':')]));
     if (jcPrice == null) continue;
 
     const total = metroPrice + jcPrice;
@@ -66,4 +84,4 @@ function computeAirportScheme(o, d, scheme, distances) {
   return best === Infinity ? null : best;
 }
 
-module.exports = { computeAirportScheme, AIRPORT_CODES, AIRPORT_TRANSFERS, officialOf };
+module.exports = { computeAirportScheme, AIRPORT_CODES, AIRPORT_TRANSFERS, officialOf, fastOf };
